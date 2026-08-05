@@ -25,6 +25,11 @@ CANCELLED = "cancelled"
 ACTIVE = (QUEUED, RUNNING)
 LOG_LIMIT = 200
 
+# A running transfer that has not moved a single byte for this long is reported
+# as stalled, so the queue stops looking busy while nothing happens.
+STALL_AFTER = 300.0
+STALL_INTERVAL = 30.0
+
 
 @dataclass
 class Job:
@@ -51,6 +56,7 @@ class Job:
     private: bool = False
     create_repo: bool = True
     commit_message: str = ""
+    stalled: bool = False
     logs: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=LOG_LIMIT))
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,6 +83,8 @@ class JobManager:
         self._on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         self._lock = asyncio.Lock()
         self._dirty = False
+        self._progress_at: dict[str, float] = {}
+        self._watchdog: asyncio.Task | None = None
 
     # ------------------------------------------------------------- Lifecycle
 
@@ -85,9 +93,13 @@ class JobManager:
 
     async def start(self) -> None:
         self._load()
+        self._watchdog = asyncio.create_task(self._watch_for_stalls())
         await self._pump()
 
     async def shutdown(self) -> None:
+        if self._watchdog is not None:
+            self._watchdog.cancel()
+            self._watchdog = None
         for job_id in list(self._procs):
             await self._terminate(job_id)
         self._save()
@@ -109,6 +121,7 @@ class JobManager:
             if job.status == RUNNING:
                 job.status = QUEUED
                 job.speed = 0.0
+            job.stalled = False
             self.jobs[job.id] = job
             self.order.append(job.id)
 
@@ -358,8 +371,10 @@ class JobManager:
 
         cancelled = job.id in self._cancelling
         self._cancelling.discard(job.id)
+        self._progress_at.pop(job.id, None)
         job.finished_at = time.time()
         job.speed = 0.0
+        job.stalled = False
 
         if cancelled or code in (143, -15, -9, 130):
             job.status = CANCELLED
@@ -411,6 +426,9 @@ class JobManager:
             job.done_files = int(event.get("done_files") or 0)
             self._save()
         elif kind == "progress":
+            if int(event.get("done_bytes") or 0) > job.done_bytes:
+                self._progress_at[job.id] = time.time()
+                job.stalled = False
             job.done_bytes = int(event.get("done_bytes") or 0)
             job.total_bytes = int(event.get("total_bytes") or job.total_bytes)
             job.total_files = int(event.get("total_files") or job.total_files)
@@ -428,7 +446,38 @@ class JobManager:
         await self._push(job)
 
     def _log(self, job: Job, message: str, level: str = "info") -> None:
-        job.logs.append({"t": time.time(), "level": level, "msg": message[:2000]})
+        text = message[:2000]
+        # A blocked transfer can repeat one line hundreds of times. Counting the
+        # repeats instead of appending them keeps the earlier — and far more
+        # useful — history inside the log limit.
+        if job.logs:
+            last = job.logs[-1]
+            if last["msg"] == text and last["level"] == level:
+                last["n"] = last.get("n", 1) + 1
+                last["t"] = time.time()
+                return
+        job.logs.append({"t": time.time(), "level": level, "msg": text})
+
+    async def _watch_for_stalls(self) -> None:
+        """Mark running jobs that stopped moving, so the UI can say so."""
+        while True:
+            await asyncio.sleep(STALL_INTERVAL)
+            now = time.time()
+            for job in list(self.jobs.values()):
+                if job.status != RUNNING or job.stalled:
+                    continue
+                since = self._progress_at.get(job.id) or job.started_at or now
+                if now - since < STALL_AFTER:
+                    continue
+                job.stalled = True
+                self._log(
+                    job,
+                    "No data received for several minutes. Check the connection "
+                    "to the Hub; on NAS hardware a depleted system entropy pool "
+                    "can block transfers as well.",
+                    "warn",
+                )
+                await self._push(job)
 
     async def _terminate(self, job_id: str) -> None:
         proc = self._procs.get(job_id)

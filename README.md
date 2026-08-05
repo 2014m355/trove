@@ -247,6 +247,68 @@ official CLI too. Trove resolves every repo ID to its canonical form when
 queueing, which also means typos and gated repos are reported immediately
 instead of failing minutes later.
 
+## Troubleshooting on a NAS
+
+Two things bite specifically on NAS hardware. Both were found running Trove on a
+Synology, and neither produces an obvious error message.
+
+### Downloads stop after a few kilobytes
+
+Small files arrive, then the job sits at `0.0 B/s` forever. Open the job and look
+at the history — if it repeats
+
+```
+RNDGETENTCNT on /dev/urandom indicates that the entropy pool does not have
+enough entropy. Rather than continue with poor entropy, this process will
+block until entropy is available.
+```
+
+the kernel has run out of randomness and OpenSSL refuses to open further TLS
+connections. Check it:
+
+```bash
+cat /proc/sys/kernel/random/entropy_avail   # below ~200 is the problem
+```
+
+Many NAS CPUs have no hardware random number generator (`/dev/hwrng` is
+missing), so the pool never refills under load. Feed it from a small companion
+container:
+
+```bash
+docker run -d --name haveged --restart unless-stopped \
+  --cap-add SYS_ADMIN \
+  harbur/haveged
+```
+
+The entropy pool belongs to the host kernel, which is why this has to run
+alongside Trove rather than inside it — and why `SYS_ADMIN` is required to write
+to it. `entropy_avail` may well stay low afterwards; that is fine, the randomness
+is simply consumed as fast as it is produced. What matters is that transfers
+start moving.
+
+### Permission denied on the mounted folder
+
+Synology user accounts start at UID 1026 and sit in group `users` (GID 100),
+while the container defaults to 1000:1000. Look yours up with `id` over SSH and
+pass it in as `PUID`/`PGID`. Do not set a `user:` in Compose or Container
+Manager — the container has to start as root so it can switch to those IDs.
+
+Shared folders additionally carry Synology ACLs, which override ordinary Unix
+permissions. If access is still refused, check what the folder actually grants:
+
+```bash
+synoacltool -get /volume1/Models
+```
+
+An entry for `administrators` alone is not enough for a container running as a
+normal user. Add one for yours — through Control Panel → Shared Folder →
+Permissions, or directly:
+
+```bash
+synoacltool -add /volume1/Models "user:yourname:allow:rwxpdDaARWc--:fd--"
+synoacltool -enforce-inherit /volume1/Models   # apply to existing content
+```
+
 ## Security
 
 * The container runs as an unprivileged user.

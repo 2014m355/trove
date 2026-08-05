@@ -301,7 +301,9 @@
     if (job.total_bytes) {
       meta.push(`<span class="${job.status === "running" ? "is-live" : ""}">${fmtBytes(job.done_bytes)} / ${fmtBytes(job.total_bytes)}</span>`);
     }
-    if (job.status === "running") {
+    if (job.status === "running" && job.stalled) {
+      meta.push(`<span class="is-err">stalled — no data for several minutes</span>`);
+    } else if (job.status === "running") {
       meta.push(`<span class="is-live">${fmtSpeed(job.speed)}</span>`);
       if (eta) meta.push(`<span>${eta}</span>`);
     }
@@ -882,6 +884,7 @@
         ${statHTML("Rate", job.status === "running" ? fmtSpeed(job.speed) : "—")}
       </div>
       ${job.error ? `<p class="hint is-err">${esc(job.error)}</p>` : ""}
+      ${job.stalled ? `<p class="hint is-err">Nothing has arrived for several minutes. Check that the container reaches huggingface.co — and on a NAS, that the system has enough entropy (see Troubleshooting in the README).</p>` : ""}
       <div class="sheet-section">
         <h3>${job.kind === "upload" ? "Source" : "Target"}</h3>
         <p class="mono hint">${esc(job.kind === "upload" ? job.src : job.dest)}</p>
@@ -890,7 +893,7 @@
         <h3>History</h3>
         <div class="log">
           ${(job.logs || []).map((line) => `
-            <div><time>${new Date(line.t * 1000).toLocaleTimeString("en-GB")}</time><span class="is-${esc(line.level)}">${esc(line.msg)}</span></div>`).join("")
+            <div><time>${new Date(line.t * 1000).toLocaleTimeString("en-GB")}</time><span class="is-${esc(line.level)}">${esc(line.msg)}</span>${line.n > 1 ? `<em class="repeat">× ${fmtNum(line.n)}</em>` : ""}</div>`).join("")
             || `<div><span>No messages yet.</span></div>`}
         </div>
       </div>`;

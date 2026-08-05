@@ -710,6 +710,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .log div { display: flex; gap: 9px; }
 .log time { color: var(--text-faint); flex: none; }
+.log .repeat { color: var(--text-faint); font-style: normal; flex: none; margin-left: auto; }
 .log .is-error { color: var(--err); }
 .log .is-warn { color: var(--warn); }
 .log .is-ok { color: var(--ok); }
