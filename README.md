@@ -170,17 +170,6 @@ docker compose up -d --build
 The bundled `docker-compose.yml` takes both mount points from `.env`, so
 `DATA_DIR=/mnt/tank/models` there does the same job as the `-v` flags above.
 
-A NAS rarely runs the same CPU as the laptop you build on. `buildx` cross-builds
-and pushes both architectures at once:
-
-```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/15ky3/trove:1.0 \
-  -t ghcr.io/15ky3/trove:latest \
-  --push .
-```
-
 ## Configuration
 
 Everything lives in `.env`:
