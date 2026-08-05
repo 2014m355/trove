@@ -132,21 +132,22 @@ reach it from other machines on the network, publish it wider (`-p 7860:8000`)
 and pick a password you would actually defend.
 
 > [!IMPORTANT]
-> **On a Synology — or any NAS without a hardware random number generator — run
-> this second container as well:**
+> **On a Synology — and most likely on any NAS — run this second container as
+> well:**
 >
 > ```bash
-> docker run -d --name haveged --restart unless-stopped \
->   --cap-add SYS_ADMIN \
->   harbur/haveged
+> docker run -d --name rngd --restart unless-stopped --privileged \
+>   debian:bookworm-slim \
+>   sh -c 'apt-get update && apt-get install -y rng-tools5 && rngd -f'
 > ```
 >
 > Without it the kernel runs out of entropy, OpenSSL refuses to open further TLS
 > connections, and downloads stop dead after a few kilobytes — with no error
 > message anywhere. The entropy pool belongs to the host kernel, so this cannot
 > be solved from inside Trove. Check whether it applies to you with
-> `cat /proc/sys/kernel/random/entropy_avail`; anything below ~200 means you
-> need it. Details in [Troubleshooting on a NAS](#troubleshooting-on-a-nas).
+> `cat /proc/sys/kernel/random/entropy_avail`; below ~200 means you need it,
+> and a healthy value afterwards is close to 4096. Details in
+> [Troubleshooting on a NAS](#troubleshooting-on-a-nas).
 
 Synology accounts start at UID 1026, so `id -u` on the NAS gives you the values
 for `PUID`/`PGID` — and shared folders carry ACLs that need their own entry.
@@ -171,12 +172,12 @@ services:
       - /mnt/tank/trove-config:/config
 
   # On a NAS, add the entropy source from the note above:
-  haveged:
-    image: harbur/haveged
-    container_name: haveged
+  rngd:
+    image: debian:bookworm-slim
+    container_name: rngd
     restart: unless-stopped
-    cap_add:
-      - SYS_ADMIN
+    privileged: true
+    command: sh -c 'apt-get update && apt-get install -y rng-tools5 && rngd -f'
 ```
 
 ### From source
@@ -292,21 +293,31 @@ connections. Check it:
 cat /proc/sys/kernel/random/entropy_avail   # below ~200 is the problem
 ```
 
-Many NAS CPUs have no hardware random number generator (`/dev/hwrng` is
-missing), so the pool never refills under load. Feed it from a small companion
-container:
+NAS kernels usually expose no random number generator to userspace at all —
+`/dev/hwrng` is missing — so the pool never refills under load, even though the
+CPU itself can produce randomness. `rngd` from the rng-tools bridges that gap:
 
 ```bash
-docker run -d --name haveged --restart unless-stopped \
-  --cap-add SYS_ADMIN \
-  harbur/haveged
+docker run -d --name rngd --restart unless-stopped --privileged \
+  debian:bookworm-slim \
+  sh -c 'apt-get update && apt-get install -y rng-tools5 && rngd -f'
 ```
 
 The entropy pool belongs to the host kernel, which is why this has to run
-alongside Trove rather than inside it — and why `SYS_ADMIN` is required to write
-to it. `entropy_avail` may well stay low afterwards; that is fine, the randomness
-is simply consumed as fast as it is produced. What matters is that transfers
-start moving.
+alongside Trove rather than inside it, and why it needs full privileges to write
+there. `entropy_avail` should jump to nearly 4096 within seconds. A log line
+about `/dev/tpm0` is harmless — that is `rngd` probing for a TPM before falling
+back to the CPU instruction (`rdrand` on Intel and AMD).
+
+If your CPU has no `rdrand` (check with `grep -m1 rdrand /proc/cpuinfo`), `rngd`
+will exit. The remaining option is to reseed from `/dev/urandom` by appending
+`-r /dev/urandom` to the command. That reliably unblocks transfers, but it feeds
+the pool with its own output, so the kernel's entropy accounting becomes
+fiction. Fine for a box that downloads public models; do not do it on a machine
+that generates keys.
+
+Note that the container installs rng-tools on every start, so it needs internet
+access at boot. Worth replacing with a purpose-built image if that bothers you.
 
 ### Permission denied on the mounted folder
 
