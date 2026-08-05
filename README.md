@@ -131,12 +131,26 @@ Then open <http://127.0.0.1:7860> and sign in with the password you set. To
 reach it from other machines on the network, publish it wider (`-p 7860:8000`)
 and pick a password you would actually defend.
 
-While the repository is private the image is too, so pull it with a token that
-has `read:packages`:
+> [!IMPORTANT]
+> **On a Synology — or any NAS without a hardware random number generator — run
+> this second container as well:**
+>
+> ```bash
+> docker run -d --name haveged --restart unless-stopped \
+>   --cap-add SYS_ADMIN \
+>   harbur/haveged
+> ```
+>
+> Without it the kernel runs out of entropy, OpenSSL refuses to open further TLS
+> connections, and downloads stop dead after a few kilobytes — with no error
+> message anywhere. The entropy pool belongs to the host kernel, so this cannot
+> be solved from inside Trove. Check whether it applies to you with
+> `cat /proc/sys/kernel/random/entropy_avail`; anything below ~200 means you
+> need it. Details in [Troubleshooting on a NAS](#troubleshooting-on-a-nas).
 
-```bash
-echo YOUR_TOKEN | docker login ghcr.io -u 15ky3 --password-stdin
-```
+Synology accounts start at UID 1026, so `id -u` on the NAS gives you the values
+for `PUID`/`PGID` — and shared folders carry ACLs that need their own entry.
+Both are covered in the troubleshooting section too.
 
 ### With Compose
 
@@ -155,6 +169,14 @@ services:
     volumes:
       - /mnt/tank/models:/data
       - /mnt/tank/trove-config:/config
+
+  # On a NAS, add the entropy source from the note above:
+  haveged:
+    image: harbur/haveged
+    container_name: haveged
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
 ```
 
 ### From source
