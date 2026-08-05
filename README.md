@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/mark.png" width="72" alt="">
+<img src="docs/mark.png" width="76" alt="Trove">
 
 # Trove
 
@@ -102,7 +102,62 @@ by hand in the container — against the same folders.
 
 ## Run it
 
-Build and start it on the machine that is going to keep the models:
+### From the registry
+
+Everything Trove keeps lives in two mounted folders, so point them at real
+paths on the host and nothing of value ends up inside the container:
+
+```bash
+docker run -d --name trove \
+  --restart unless-stopped \
+  -p 127.0.0.1:7860:8000 \
+  -e UI_PASSWORD=changeme \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v /mnt/tank/models:/data \
+  -v /mnt/tank/trove-config:/config \
+  ghcr.io/15ky3/trove:latest
+```
+
+| Mount | Holds |
+|---|---|
+| `/data` | every model and dataset, as plain files under `models/` and `datasets/` |
+| `/config` | settings, the API token and the queue state |
+
+Swap `/mnt/tank/...` for wherever your storage actually is. `PUID`/`PGID` make
+the downloaded files belong to you rather than to root — on macOS they do no
+harm and can be left out.
+
+Then open <http://127.0.0.1:7860> and sign in with the password you set. To
+reach it from other machines on the network, publish it wider (`-p 7860:8000`)
+and pick a password you would actually defend.
+
+While the repository is private the image is too, so pull it with a token that
+has `read:packages`:
+
+```bash
+echo YOUR_TOKEN | docker login ghcr.io -u 15ky3 --password-stdin
+```
+
+### With Compose
+
+```yaml
+services:
+  trove:
+    image: ghcr.io/15ky3/trove:latest
+    container_name: trove
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7860:8000"
+    environment:
+      UI_PASSWORD: changeme
+      PUID: 1000
+      PGID: 1000
+    volumes:
+      - /mnt/tank/models:/data
+      - /mnt/tank/trove-config:/config
+```
+
+### From source
 
 ```bash
 git clone https://github.com/15ky3/trove.git
@@ -112,28 +167,19 @@ $EDITOR .env                 # UI_PASSWORD, DATA_DIR, PUID/PGID
 docker compose up -d --build
 ```
 
-Then open <http://127.0.0.1:7860> and sign in. Two things are worth changing
-right away: pick a real password, and point `DATA_DIR` at wherever your storage
-actually lives.
-
-To reach it from other machines on the network, set `BIND_ADDR=0.0.0.0` in
-`.env` — and set a password you would actually defend.
-
-### Building for a different machine
+The bundled `docker-compose.yml` takes both mount points from `.env`, so
+`DATA_DIR=/mnt/tank/models` there does the same job as the `-v` flags above.
 
 A NAS rarely runs the same CPU as the laptop you build on. `buildx` cross-builds
-and pushes to whichever registry you use:
+and pushes both architectures at once:
 
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t YOUR-REGISTRY/trove:1.0 \
-  -t YOUR-REGISTRY/trove:latest \
+  -t ghcr.io/15ky3/trove:1.0 \
+  -t ghcr.io/15ky3/trove:latest \
   --push .
 ```
-
-Building directly on the target machine works just as well and needs no
-registry at all.
 
 ## Configuration
 
