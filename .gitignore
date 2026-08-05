@@ -1,0 +1,19 @@
+# Local runtime data (mounted volumes)
+/data/
+/config/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Assistant scratch notes
+CLAUDE.md
+
+# OS / editors
+.DS_Store
+*.swp
+.idea/
+.vscode/

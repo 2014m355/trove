@@ -1,0 +1,4 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+huggingface_hub[hf-xet]==1.26.0
+itsdangerous==2.2.0

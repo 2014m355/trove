@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Trove — model library</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7.5' fill='%23FF7A1A'/><g fill='%23151B24'><rect x='7' y='8.5' width='18' height='3' rx='1.5'/><rect x='7' y='14.5' width='11' height='3' rx='1.5'/><rect x='18.5' y='14.5' width='6.5' height='3' rx='1.5' opacity='.3'/><rect x='7' y='20.5' width='18' height='3' rx='1.5' opacity='.3'/></g></svg>">
+</head>
+<body>
+
+<!-- Sign in -->
+<div class="gate" id="gate" hidden>
+  <form class="gate-card" id="gate-form">
+    <div class="gate-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32">
+        <rect class="mark-tile" width="32" height="32" rx="7.5"/>
+        <rect class="mark-bar" x="7" y="8.5" width="18" height="3" rx="1.5"/>
+        <rect class="mark-bar" x="7" y="14.5" width="11" height="3" rx="1.5"/>
+        <rect class="mark-track" x="18.5" y="14.5" width="6.5" height="3" rx="1.5"/>
+        <rect class="mark-track" x="7" y="20.5" width="18" height="3" rx="1.5"/>
+      </svg>
+    </div>
+    <h1>Trove</h1>
+    <p class="gate-hint">Enter the password to control transfers.</p>
+    <input type="password" id="gate-pass" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit" class="btn btn-accent btn-block">Sign in</button>
+    <p class="gate-error" id="gate-error" hidden></p>
+  </form>
+</div>
+
+<!-- App -->
+<div class="shell" id="shell" hidden>
+
+  <aside class="rail">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect class="mark-tile" width="32" height="32" rx="7.5"/>
+        <rect class="mark-bar" x="7" y="8.5" width="18" height="3" rx="1.5"/>
+        <rect class="mark-bar" x="7" y="14.5" width="11" height="3" rx="1.5"/>
+        <rect class="mark-track" x="18.5" y="14.5" width="6.5" height="3" rx="1.5"/>
+        <rect class="mark-track" x="7" y="20.5" width="18" height="3" rx="1.5"/>
+      </svg>
+      <span class="brand-name">tro<span>·</span>ve</span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item is-active" data-view="library">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8.5h17V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V8.5zM3.5 8.5L5 4.5h14l1.5 4M10 12.5h4"/></svg>
+        <span>Library</span><em class="nav-count" data-count="library"></em>
+      </button>
+      <button class="nav-item" data-view="hub">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+        <span>Hub</span>
+      </button>
+      <button class="nav-item" data-view="queue">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v13M7 12l5 5 5-5M5 20h14"/></svg>
+        <span>Queue</span><em class="nav-count" data-count="queue"></em>
+      </button>
+      <button class="nav-item" data-view="upload">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V7M7 12l5-5 5 5M5 4h14"/></svg>
+        <span>Upload</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h10M18 8h2M4 16h4M12 16h8"/><circle cx="16" cy="8" r="2.2"/><circle cx="10" cy="16" r="2.2"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="disk">
+        <div class="disk-head"><span>Storage</span><b id="disk-free">—</b></div>
+        <div class="disk-rail"><i id="disk-fill" style="width:0%"></i></div>
+        <div class="disk-path mono" id="disk-path">/data</div>
+      </div>
+      <div class="rail-version mono">
+        <span>Trove</span><span id="app-version">1.0</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1 id="view-title">Library</h1>
+        <p id="view-sub">—</p>
+      </div>
+      <div class="throughput" id="throughput" hidden>
+        <span class="tp-dot"></span>
+        <span class="mono" id="tp-text">0 B/s</span>
+      </div>
+    </header>
+
+    <!-- Library -->
+    <section class="view" id="view-library">
+      <div class="toolbar">
+        <div class="seg" id="lib-filter">
+          <button class="is-active" data-type="">All</button>
+          <button data-type="model">Models</button>
+          <button data-type="dataset">Datasets</button>
+          <button data-type="space">Spaces</button>
+        </div>
+        <input class="field field-search" id="lib-search" type="search" placeholder="Filter…">
+        <button class="btn" id="lib-refresh">Recalculate sizes</button>
+      </div>
+      <div id="lib-list" class="tape-list"></div>
+    </section>
+
+    <!-- Hub -->
+    <section class="view" id="view-hub" hidden>
+      <div class="toolbar">
+        <div class="seg" id="hub-type">
+          <button class="is-active" data-type="model">Models</button>
+          <button data-type="dataset">Datasets</button>
+          <button data-type="space">Spaces</button>
+        </div>
+        <input class="field field-search" id="hub-search" type="search" placeholder="Search, or paste org/name…" autocomplete="off">
+        <button class="btn btn-accent" id="hub-direct">Download now</button>
+      </div>
+      <div id="hub-list" class="tape-list"></div>
+    </section>
+
+    <!-- Queue -->
+    <section class="view" id="view-queue" hidden>
+      <div class="toolbar">
+        <div class="queue-stats mono" id="queue-stats">—</div>
+        <button class="btn" id="queue-clear">Clear finished</button>
+      </div>
+      <div id="queue-list" class="tape-list"></div>
+    </section>
+
+    <!-- Upload -->
+    <section class="view" id="view-upload" hidden>
+      <form class="form" id="upload-form">
+        <div class="form-row">
+          <label for="up-src">Local folder</label>
+          <div class="form-control">
+            <input class="field mono" id="up-src" list="up-src-list" placeholder="/data/models/org/name" required>
+            <datalist id="up-src-list"></datalist>
+            <p class="hint">Must sit inside <span class="mono" id="up-datadir">/data</span>.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="up-repo">Target repo</label>
+          <div class="form-control">
+            <input class="field mono" id="up-repo" placeholder="your-name/my-model" required>
+            <p class="hint">Created on the Hub if it doesn't exist yet.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Type</label>
+          <div class="form-control">
+            <div class="seg" id="up-type">
+              <button type="button" class="is-active" data-type="model">Model</button>
+              <button type="button" data-type="dataset">Dataset</button>
+              <button type="button" data-type="space">Space</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="up-msg">Commit message</label>
+          <div class="form-control">
+            <input class="field" id="up-msg" placeholder="Upload via Trove">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Options</label>
+          <div class="form-control">
+            <label class="check"><input type="checkbox" id="up-private"> <span>Private repo</span></label>
+            <label class="check"><input type="checkbox" id="up-create" checked> <span>Create the repo if it's missing</span></label>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="up-ignore">Exclude</label>
+          <div class="form-control">
+            <input class="field mono" id="up-ignore" placeholder="*.bin, checkpoint-*/*">
+            <p class="hint">Comma-separated patterns. <span class="mono">.cache</span>, <span class="mono">.git</span> and marker files are always left out.</p>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-accent">Upload</button>
+          <span class="hint" id="up-token-hint"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- Settings -->
+    <section class="view" id="view-settings" hidden>
+      <form class="form" id="settings-form">
+        <div class="form-row">
+          <label for="set-token">API token</label>
+          <div class="form-control">
+            <div class="field-row">
+              <input class="field mono" id="set-token" type="password" placeholder="hf_…" autocomplete="off">
+              <button type="button" class="btn" id="set-token-test">Check</button>
+            </div>
+            <p class="hint" id="set-token-state">—</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="set-endpoint">Hub endpoint</label>
+          <div class="form-control">
+            <input class="field mono" id="set-endpoint" placeholder="https://huggingface.co">
+            <p class="hint">Only change this for a mirror or an enterprise Hub.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="set-concurrent">Parallel transfers</label>
+          <div class="form-control">
+            <input class="field field-num mono" id="set-concurrent" type="number" min="1" max="16">
+            <p class="hint">How many jobs run at once. Takes effect immediately for waiting jobs.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="set-workers">Threads per download</label>
+          <div class="form-control">
+            <input class="field field-num mono" id="set-workers" type="number" min="1" max="32">
+            <p class="hint">Higher saturates fast connections but works the disk harder.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Behaviour</label>
+          <div class="form-control">
+            <label class="check"><input type="checkbox" id="set-autoclear"> <span>Drop finished jobs from the queue automatically</span></label>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-accent">Save</button>
+          <button type="button" class="btn" id="btn-logout">Sign out</button>
+        </div>
+      </form>
+
+      <div class="cli-note">
+        <h3>CLI inside the container</h3>
+        <p>The <span class="mono">hf</span> CLI ships in the same image — for anything this interface doesn't cover:</p>
+        <pre class="mono">docker compose exec trove \
+  hf download org/name --local-dir /data/models/org/name</pre>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-scrim" data-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <header class="sheet-head">
+      <div>
+        <p class="eyebrow" id="sheet-eyebrow">Repo</p>
+        <h2 class="mono" id="sheet-title">—</h2>
+      </div>
+      <button class="icon-btn" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="sheet-body" id="sheet-body"></div>
+    <footer class="sheet-foot" id="sheet-foot"></footer>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

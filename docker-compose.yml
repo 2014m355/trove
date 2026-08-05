@@ -1,0 +1,24 @@
+services:
+  trove:
+    build: .
+    image: trove:latest
+    container_name: trove
+    restart: unless-stopped
+    env_file:
+      - .env
+    # UI_PASSWORD, HF_TOKEN, HF_ENDPOINT, PUID and PGID come from .env.
+    # Deliberately not repeated here: docker compose would pass unset variables
+    # through as an empty string, and an empty HF_ENDPOINT crashes the hf CLI
+    # in `docker compose exec`.
+    environment:
+      DATA_DIR: /data
+      CONFIG_DIR: /config
+      HF_HOME: /data/.hf-home
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-7860}:8000"
+    volumes:
+      # Every model and dataset lands here (--local-dir always points inside).
+      - ${DATA_DIR:-./data}:/data
+      # Settings, API token and queue state.
+      - ${CONFIG_DIR:-./config}:/config
+    stop_grace_period: 30s

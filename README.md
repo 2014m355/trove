@@ -1,0 +1,228 @@
+<div align="center">
+
+<img src="docs/mark.png" width="72" alt="">
+
+# Trove
+
+**A model library for your own server.**
+Pull models and datasets off the Hugging Face Hub, keep them as plain files, and
+watch every transfer while it happens.
+
+![License](https://img.shields.io/badge/license-MIT-ff7a1a)
+![Python](https://img.shields.io/badge/python-3.12-ff7a1a)
+![Docker](https://img.shields.io/badge/docker-compose-ff7a1a)
+
+<img src="docs/library.png" width="900" alt="The library view, listing downloaded models with size, file count and path">
+
+</div>
+
+## Why this exists
+
+Models are big, connections are slow, and the machine you want them on is rarely
+the machine you are sitting at. Trove runs on the NAS or the server where the
+storage actually lives, so downloads happen there — in the background, on the
+fast link, into a folder you already back up.
+
+Over time that folder becomes something worth having: a collection of the models
+you use, at the revisions you tested, still there after a Hub repo goes gated,
+gets renamed, or disappears. Plain files in plain directories — no hashed cache,
+nothing that needs a Python environment to read:
+
+```
+/data/models/meta-llama/Llama-3.1-8B-Instruct/
+/data/models/Qwen/Qwen3-8B/
+/data/datasets/HuggingFaceFW/fineweb-edu/
+```
+
+Point `llama.cpp`, vLLM, ComfyUI or an NFS share straight at them.
+
+And you rarely want a whole repo. A quantised model repo routinely carries every
+quant from `IQ3_M` to `f16` — tick the one you actually run and leave the other
+38 GB on the Hub.
+
+## What it does
+
+<table>
+<tr><td width="50%">
+
+**Queue several transfers at once**
+Start as many downloads as you like; Trove runs a couple in parallel and works
+through the rest. Close the browser — the server keeps going. Restart the
+container — unfinished transfers pick up where they left off.
+
+</td><td width="50%">
+
+**Watch them live**
+Bytes, files, rate and time remaining, updated about once a second over a
+WebSocket. Every row carries its own progress as its baseline, so a busy queue
+reads at a glance.
+
+</td></tr>
+<tr><td>
+
+**Take one file, not the whole repo**
+A GGUF repo can hold twenty quants and 40 GB when you want a single 1.9 GB one.
+Tick the files you want and only those come down. Split quants are listed as one
+entry, so you always get every part.
+
+</td><td>
+
+**Upload, too**
+Push a local folder back to the Hub, creating the repo if it doesn't exist,
+public or private, with the same live progress.
+
+</td></tr>
+<tr><td>
+
+**Keep the shelf tidy**
+Sizes, file counts, revisions and commit hashes per repo. Inspect the files,
+re-fetch what changed upstream, delete what you no longer need.
+
+</td><td>
+
+**The real CLI is still there**
+`hf` ships in the same image. Anything the interface doesn't cover, you can do
+by hand in the container — against the same folders.
+
+</td></tr>
+</table>
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="docs/queue.png" alt="Queue with two running downloads, two waiting and finished entries"><br><sub><b>Queue</b> — two running with rate and time left, two waiting, history below.</sub></td>
+<td width="50%"><img src="docs/hub.png" alt="Hub search results"><br><sub><b>Hub</b> — search results with downloads, likes and what you already have.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/picker.png" alt="File picker with two GGUF quants ticked out of twenty-one files"><br><sub><b>Pick files</b> — two quants ticked: 4.34 GB instead of 40.2 GB.</sub></td>
+<td><img src="docs/settings.png" alt="Settings with token, endpoint and concurrency"><br><sub><b>Settings</b> — token, endpoint, concurrency, threads per download.</sub></td>
+</tr>
+</table>
+
+## Run it
+
+Build and start it on the machine that is going to keep the models:
+
+```bash
+git clone https://github.com/15ky3/trove.git
+cd trove
+cp .env.example .env
+$EDITOR .env                 # UI_PASSWORD, DATA_DIR, PUID/PGID
+docker compose up -d --build
+```
+
+Then open <http://127.0.0.1:7860> and sign in. Two things are worth changing
+right away: pick a real password, and point `DATA_DIR` at wherever your storage
+actually lives.
+
+To reach it from other machines on the network, set `BIND_ADDR=0.0.0.0` in
+`.env` — and set a password you would actually defend.
+
+### Building for a different machine
+
+A NAS rarely runs the same CPU as the laptop you build on. `buildx` cross-builds
+and pushes to whichever registry you use:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t YOUR-REGISTRY/trove:1.0 \
+  -t YOUR-REGISTRY/trove:latest \
+  --push .
+```
+
+Building directly on the target machine works just as well and needs no
+registry at all.
+
+## Configuration
+
+Everything lives in `.env`:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `UI_PASSWORD` | — | Password for the interface. Empty means no sign-in at all. |
+| `DATA_DIR` | `./data` | Host folder for models, mounted at `/data`. |
+| `CONFIG_DIR` | `./config` | Settings, token and queue state. |
+| `BIND_ADDR` | `127.0.0.1` | Set to `0.0.0.0` to reach it from the network — set a password first. |
+| `PORT` | `7860` | Port on the host. |
+| `HF_TOKEN` | — | Optional starting token; what you enter in Settings wins. |
+| `HF_ENDPOINT` | — | Only for a mirror or enterprise Hub. **Leave it commented out when unused** — an empty value confuses `huggingface_hub`. |
+| `PUID` / `PGID` | `1000` | On Linux set these to `id -u` / `id -g` so downloaded files belong to you. |
+
+The API token goes in under **Settings** rather than here, so it never sits in
+your shell history or a compose file. It is stored in `CONFIG_DIR/settings.json`
+with `0600` permissions and only ever sent back to the browser masked.
+
+## The CLI in the same container
+
+```bash
+docker compose exec trove hf download org/name --local-dir /data/models/org/name
+docker compose exec trove hf upload org/name /data/models/org/name
+docker compose exec trove hf auth whoami
+```
+
+## How it works
+
+```
+app/
+  main.py       FastAPI: REST, WebSocket broadcast, password session
+  jobs.py       queue: concurrency, cancel, retry, persistence
+  worker.py     one subprocess per transfer, reports progress as JSONL
+  hub.py        search, repo info, token check
+  storage.py    local library: list, size, delete
+  static/       the interface (vanilla JS, no build step)
+```
+
+Every transfer runs as its **own process**, and that one decision buys most of
+the behaviour above:
+
+* `snapshot_download` cannot be interrupted — a process can. **Cancel** sends
+  SIGTERM, finished files stay on disk, **Try again** resumes from there.
+* Blocking network calls can never stall the server, so the interface stays
+  responsive with a dozen transfers in flight.
+* A transfer that crashes takes only its own process with it.
+
+Progress comes from `huggingface_hub`'s own counters — downloads through the
+documented `tqdm_class`, uploads through a hook into the live display of
+`upload_folder`. If a future release changes that internal, uploads keep
+working; they just lose the byte readout, and the job log says so.
+
+The queue is stored in `CONFIG_DIR/jobs.json`, so it survives restarts:
+interrupted transfers are re-queued and continue.
+
+### Picking individual files
+
+Ticking files in the detail panel is a friendlier front end for
+`allow_patterns`: each name is turned into an exact pattern (glob characters in
+a filename are escaped, so a literal `[` stays a `[`). Files split across parts —
+`…-00001-of-00002.gguf`, `model-00001-of-00004.safetensors` — are grouped into a
+single entry, because half of a split quant is worth nothing.
+
+The selection is stored alongside the download, so **Refresh from Hub** on a
+partial copy fetches the same files again instead of suddenly pulling the whole
+repo. Partial copies are marked as such in the library.
+
+### A Hub quirk worth knowing
+
+Legacy short names like `bert-base-uncased` redirect to
+`google-bert/bert-base-uncased`. The Xet storage endpoint does not follow that
+redirect and returns a 404 partway through the download — this happens with the
+official CLI too. Trove resolves every repo ID to its canonical form when
+queueing, which also means typos and gated repos are reported immediately
+instead of failing minutes later.
+
+## Security
+
+* The container runs as an unprivileged user.
+* Repo IDs and paths are validated against directory traversal; deleting and
+  uploading only ever touch `/data`.
+* The token is passed to worker processes through the environment, never as a
+  command-line argument where `ps` would show it.
+* There is no multi-user model here. Anyone who can reach the port and knows the
+  password can download, upload and delete. Keep it behind your own network or a
+  reverse proxy with TLS.
+
+## License
+
+MIT

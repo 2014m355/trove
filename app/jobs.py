@@ -1,0 +1,450 @@
+"""The transfer queue: download/upload jobs and their worker processes."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import time
+import uuid
+from collections import deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Awaitable, Callable
+
+from .config import JOBS_FILE, local_dir_for, settings
+from . import storage
+
+QUEUED = "queued"
+RUNNING = "running"
+DONE = "done"
+ERROR = "error"
+CANCELLED = "cancelled"
+
+ACTIVE = (QUEUED, RUNNING)
+LOG_LIMIT = 200
+
+
+@dataclass
+class Job:
+    id: str
+    kind: str  # download | upload
+    repo_id: str
+    repo_type: str = "model"
+    revision: str = ""
+    status: str = QUEUED
+    dest: str = ""
+    src: str = ""
+    total_bytes: int = 0
+    done_bytes: int = 0
+    total_files: int = 0
+    done_files: int = 0
+    speed: float = 0.0
+    error: str = ""
+    created_at: float = field(default_factory=time.time)
+    started_at: float = 0.0
+    finished_at: float = 0.0
+    files: list[str] = field(default_factory=list)
+    allow_patterns: list[str] = field(default_factory=list)
+    ignore_patterns: list[str] = field(default_factory=list)
+    private: bool = False
+    create_repo: bool = True
+    commit_message: str = ""
+    logs: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=LOG_LIMIT))
+
+    def to_dict(self) -> dict[str, Any]:
+        data = {k: v for k, v in self.__dict__.items() if k != "logs"}
+        data["logs"] = list(self.logs)[-60:]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Job":
+        logs = data.pop("logs", [])
+        known = {k: v for k, v in data.items() if k in cls.__annotations__}
+        job = cls(**known)
+        job.logs.extend(logs[-30:])
+        return job
+
+
+class JobManager:
+    def __init__(self) -> None:
+        self.jobs: dict[str, Job] = {}
+        self.order: list[str] = []
+        self._procs: dict[str, asyncio.subprocess.Process] = {}
+        self._cancelling: set[str] = set()
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        self._lock = asyncio.Lock()
+        self._dirty = False
+
+    # ------------------------------------------------------------- Lifecycle
+
+    def bind(self, callback: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+        self._on_event = callback
+
+    async def start(self) -> None:
+        self._load()
+        await self._pump()
+
+    async def shutdown(self) -> None:
+        for job_id in list(self._procs):
+            await self._terminate(job_id)
+        self._save()
+
+    # ----------------------------------------------------------- Persistence
+
+    def _load(self) -> None:
+        try:
+            raw = json.loads(JOBS_FILE.read_text())
+        except (OSError, ValueError):
+            return
+        for entry in raw.get("jobs", []):
+            try:
+                job = Job.from_dict(dict(entry))
+            except (TypeError, ValueError):
+                continue
+            # Re-queue transfers a restart interrupted; hf_hub resumes files
+            # it had already started.
+            if job.status == RUNNING:
+                job.status = QUEUED
+                job.speed = 0.0
+            self.jobs[job.id] = job
+            self.order.append(job.id)
+
+    def _save(self) -> None:
+        try:
+            JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"jobs": [self.jobs[i].to_dict() for i in self.order if i in self.jobs]}
+            tmp = JOBS_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, indent=1, default=str))
+            tmp.replace(JOBS_FILE)
+        except OSError:
+            pass
+
+    # --------------------------------------------------------------- Events
+
+    async def _emit(self, event: str, **payload: Any) -> None:
+        if self._on_event:
+            await self._on_event({"type": event, **payload})
+
+    async def _push(self, job: Job) -> None:
+        await self._emit("job", job=job.to_dict())
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        return [self.jobs[i].to_dict() for i in self.order if i in self.jobs]
+
+    def stats(self) -> dict[str, int]:
+        counts = {QUEUED: 0, RUNNING: 0, DONE: 0, ERROR: 0, CANCELLED: 0}
+        for job in self.jobs.values():
+            counts[job.status] = counts.get(job.status, 0) + 1
+        return counts
+
+    # ---------------------------------------------------------- Public API
+
+    async def add_download(
+        self,
+        repo_id: str,
+        repo_type: str = "model",
+        revision: str = "",
+        files: list[str] | None = None,
+        allow_patterns: list[str] | None = None,
+        ignore_patterns: list[str] | None = None,
+    ) -> Job:
+        dest = local_dir_for(repo_type, repo_id)
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            kind="download",
+            repo_id=repo_id,
+            repo_type=repo_type,
+            revision=revision or "",
+            dest=str(dest),
+            files=files or [],
+            allow_patterns=allow_patterns or [],
+            ignore_patterns=ignore_patterns or [],
+        )
+        return await self._enqueue(job)
+
+    async def add_upload(
+        self,
+        repo_id: str,
+        src: str,
+        repo_type: str = "model",
+        private: bool = False,
+        create_repo: bool = True,
+        commit_message: str = "",
+        revision: str = "",
+        allow_patterns: list[str] | None = None,
+        ignore_patterns: list[str] | None = None,
+    ) -> Job:
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            kind="upload",
+            repo_id=repo_id,
+            repo_type=repo_type,
+            revision=revision or "",
+            src=src,
+            private=private,
+            create_repo=create_repo,
+            commit_message=commit_message,
+            allow_patterns=allow_patterns or [],
+            ignore_patterns=ignore_patterns or [],
+        )
+        return await self._enqueue(job)
+
+    async def _enqueue(self, job: Job) -> Job:
+        self.jobs[job.id] = job
+        self.order.append(job.id)
+        job.logs.append({"t": time.time(), "level": "info", "msg": "Added to the queue."})
+        self._save()
+        await self._push(job)
+        await self._pump()
+        return job
+
+    async def cancel(self, job_id: str) -> Job:
+        job = self._require(job_id)
+        if job.status == RUNNING:
+            self._cancelling.add(job_id)
+            await self._terminate(job_id)
+        elif job.status == QUEUED:
+            job.status = CANCELLED
+            job.finished_at = time.time()
+            job.logs.append({"t": time.time(), "level": "warn", "msg": "Removed from the queue."})
+            self._save()
+            await self._push(job)
+        return job
+
+    async def retry(self, job_id: str) -> Job:
+        job = self._require(job_id)
+        if job.status in ACTIVE:
+            return job
+        job.status = QUEUED
+        job.error = ""
+        job.speed = 0.0
+        job.done_bytes = 0
+        job.done_files = 0
+        job.started_at = 0.0
+        job.finished_at = 0.0
+        job.logs.append({"t": time.time(), "level": "info", "msg": "Trying again."})
+        self._save()
+        await self._push(job)
+        await self._pump()
+        return job
+
+    async def remove(self, job_id: str) -> None:
+        job = self._require(job_id)
+        if job.status in ACTIVE:
+            await self.cancel(job_id)
+        self.jobs.pop(job_id, None)
+        if job_id in self.order:
+            self.order.remove(job_id)
+        self._save()
+        await self._emit("removed", id=job_id)
+
+    async def clear_finished(self) -> int:
+        removed = [i for i in list(self.order) if self.jobs[i].status not in ACTIVE]
+        for job_id in removed:
+            self.jobs.pop(job_id, None)
+            self.order.remove(job_id)
+        self._save()
+        await self._emit("jobs", jobs=self.snapshot())
+        return len(removed)
+
+    def _require(self, job_id: str) -> Job:
+        job = self.jobs.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        return job
+
+    # ------------------------------------------------------------ Scheduler
+
+    async def _pump(self) -> None:
+        async with self._lock:
+            limit = int(settings.get("max_concurrent") or 1)
+            running = sum(1 for j in self.jobs.values() if j.status == RUNNING)
+            for job_id in self.order:
+                if running >= limit:
+                    break
+                job = self.jobs.get(job_id)
+                if job is None or job.status != QUEUED:
+                    continue
+                job.status = RUNNING
+                job.started_at = time.time()
+                running += 1
+                self._tasks[job_id] = asyncio.create_task(self._run(job))
+                await self._push(job)
+
+    def _build_command(self, job: Job) -> list[str]:
+        if job.kind == "upload":
+            payload = {
+                "kind": "upload",
+                "repo_id": job.repo_id,
+                "repo_type": job.repo_type,
+                "src": job.src,
+                "revision": job.revision,
+                "private": job.private,
+                "create_repo": job.create_repo,
+                "commit_message": job.commit_message,
+                "allow_patterns": job.allow_patterns,
+                "ignore_patterns": job.ignore_patterns,
+            }
+        else:
+            payload = {
+                "kind": "download",
+                "repo_id": job.repo_id,
+                "repo_type": job.repo_type,
+                "revision": job.revision,
+                "dest": job.dest,
+                "files": job.files,
+                "allow_patterns": job.allow_patterns,
+                "ignore_patterns": job.ignore_patterns,
+                "max_workers": int(settings.get("max_workers") or 8),
+            }
+        return [sys.executable, "-u", "-m", "app.worker", json.dumps(payload)]
+
+    def _build_env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        # The token goes through the environment on purpose: argv shows up in `ps`.
+        token = settings.get("hf_token") or ""
+        if token:
+            env["HF_TOKEN"] = token
+        else:
+            env.pop("HF_TOKEN", None)
+        endpoint = settings.get("endpoint") or ""
+        if endpoint:
+            env["HF_ENDPOINT"] = endpoint
+        else:
+            env.pop("HF_ENDPOINT", None)
+        env["PYTHONUNBUFFERED"] = "1"
+        env["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
+        return env
+
+    async def _run(self, job: Job) -> None:
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self._build_command(job),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._build_env(),
+                cwd=str(Path(__file__).resolve().parent.parent),
+            )
+            self._procs[job.id] = proc
+            stderr_task = asyncio.create_task(self._drain_stderr(job, proc))
+
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    self._log(job, line)
+                    continue
+                await self._handle_event(job, event)
+
+            code = await proc.wait()
+            await stderr_task
+        except FileNotFoundError as exc:
+            job.error = f"Could not start the worker process: {exc}"
+            code = 1
+        except Exception as exc:  # noqa: BLE001
+            job.error = f"{type(exc).__name__}: {exc}"
+            code = 1
+        finally:
+            self._procs.pop(job.id, None)
+            self._tasks.pop(job.id, None)
+
+        cancelled = job.id in self._cancelling
+        self._cancelling.discard(job.id)
+        job.finished_at = time.time()
+        job.speed = 0.0
+
+        if cancelled or code in (143, -15, -9, 130):
+            job.status = CANCELLED
+            self._log(job, "Transfer cancelled.", "warn")
+        elif code == 0 and job.status == RUNNING:
+            job.status = DONE
+            if job.total_bytes:
+                job.done_bytes = job.total_bytes
+            if job.total_files:
+                job.done_files = job.total_files
+            self._log(job, "Finished.", "ok")
+            storage.invalidate()
+        elif job.status == RUNNING:
+            job.status = ERROR
+            if not job.error:
+                job.error = f"Worker exited with code {code}"
+            self._log(job, job.error, "error")
+
+        # The job may have been removed while its process was still shutting
+        # down; broadcasting it now would resurrect it in every open tab.
+        if job.id not in self.jobs:
+            return
+        self._save()
+        await self._push(job)
+
+        if settings.get("auto_clear_done") and job.status == DONE:
+            await asyncio.sleep(3)
+            await self.remove(job.id)
+
+        await self._pump()
+
+    async def _drain_stderr(self, job: Job, proc: asyncio.subprocess.Process) -> None:
+        assert proc.stderr is not None
+        async for raw in proc.stderr:
+            text = raw.decode("utf-8", "replace").strip()
+            if not text or text.startswith("\r"):
+                continue
+            # Keep tqdm and hf chatter out of the job log.
+            if "it/s" in text or "B/s" in text or text.startswith("Found "):
+                continue
+            self._log(job, text, "warn" if "warn" in text.lower() else "info")
+
+    async def _handle_event(self, job: Job, event: dict[str, Any]) -> None:
+        kind = event.get("e")
+        if kind == "meta":
+            job.total_bytes = int(event.get("total_bytes") or 0)
+            job.done_bytes = int(event.get("done_bytes") or 0)
+            job.total_files = int(event.get("total_files") or 0)
+            job.done_files = int(event.get("done_files") or 0)
+            self._save()
+        elif kind == "progress":
+            job.done_bytes = int(event.get("done_bytes") or 0)
+            job.total_bytes = int(event.get("total_bytes") or job.total_bytes)
+            job.total_files = int(event.get("total_files") or job.total_files)
+            job.done_files = int(event.get("done_files") or job.done_files)
+            job.speed = float(event.get("speed") or 0.0)
+        elif kind == "log":
+            self._log(job, str(event.get("msg", "")), str(event.get("level", "info")))
+        elif kind == "done":
+            if event.get("path"):
+                job.dest = job.dest or str(event["path"])
+        elif kind == "error":
+            job.error = str(event.get("msg", "Unknown error"))
+            self._log(job, job.error, "error")
+
+        await self._push(job)
+
+    def _log(self, job: Job, message: str, level: str = "info") -> None:
+        job.logs.append({"t": time.time(), "level": level, "msg": message[:2000]})
+
+    async def _terminate(self, job_id: str) -> None:
+        proc = self._procs.get(job_id)
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=8)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+
+manager = JobManager()
